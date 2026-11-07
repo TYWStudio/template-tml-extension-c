@@ -1,0 +1,82 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.x'
+
+      - name: Validate manifest
+        run: |
+          python3 -c "import json; d=json.load(open('manifest.json')); assert d['apiVersion']==1, 'apiVersion 必须为 1'; assert d['format']=='tmlext'; assert d['runtime']=='c'; assert 'windows' in d['platforms']; print('manifest OK')"
+
+      - name: Build (gcc)
+        run: gcc -O2 -Wall -Wextra -o bin/tml_ext src/main.c
+
+      - name: Protocol smoke test
+        run: |
+          python3 - <<'PY'
+          import subprocess, json, threading, time
+
+          cmd = ["./bin/tml_ext"]
+          ok = {"handshake": False, "log": False}
+
+          def reader():
+              for raw in p.stdout:
+                  line = raw.strip()
+                  if not line:
+                      continue
+                  try:
+                      m = json.loads(line)
+                  except Exception:
+                      continue
+                  if m.get("id") == 1 and isinstance(m.get("result"), dict) and m["result"].get("ready"):
+                      ok["handshake"] = True
+                  if m.get("method") == "log":
+                      ok["log"] = True
+                  if m.get("method") and m.get("id") is not None and m.get("method") != "initialize":
+                      resp = {"id": m["id"], "result": {}}
+                      if m["method"] == "host.info":
+                          resp["result"] = {"platform": "windows", "apiVersion": 1, "launcherVersion": "1.1.40", "channel": "Release", "language": "zh-CN", "architecture": "x64"}
+                      elif m["method"] == "instances.list":
+                          resp["result"] = {"instances": [{"id": "1", "name": "测试服", "gameVersion": "1.20.1", "loader": "fabric"}]}
+                      elif m["method"] == "event.subscribe":
+                          resp["result"] = {"accepted": m.get("params", {}).get("types", [])}
+                      elif m["method"] in ("storage.get", "settings.get"):
+                          resp["result"] = {"value": None}
+                      p.stdin.write(json.dumps(resp) + "\n")
+                      p.stdin.flush()
+
+          p = subprocess.Popen(cmd, stdin=subprocess.PIPE, stdout=subprocess.PIPE, text=True, bufsize=1)
+          t = threading.Thread(target=reader)
+          t.start()
+          p.stdin.write(json.dumps({"id": 1, "method": "initialize", "params": {"apiVersion": 1, "extId": "ci", "platform": "windows", "launcherVersion": "1.1.40", "channel": "Release", "language": "zh-CN", "privateDir": "/tmp/ext", "permissions": ["log", "toast", "host.info", "instances.list", "events", "storage", "settings"], "nonce": "n"}}) + "\n")
+          p.stdin.flush()
+          time.sleep(0.8)
+          p.stdin.write(json.dumps({"id": 2, "method": "log", "params": {"level": "info", "message": "ci"}}) + "\n")
+          p.stdin.flush()
+          time.sleep(0.3)
+          p.stdin.write(json.dumps({"id": 3, "method": "host.info"}) + "\n")
+          p.stdin.flush()
+          time.sleep(0.3)
+          p.stdin.write(json.dumps({"method": "shutdown"}) + "\n")
+          p.stdin.flush()
+          try:
+              p.wait(timeout=4)
+          except Exception:
+              p.kill()
+          t.join(timeout=2)
+          assert ok["handshake"], "握手失败：扩展未返回 ready"
+          assert ok["log"], "未收到扩展的 log 调用"
+          print("PROTOCOL OK (exit=%s)" % p.returncode)
+          PY

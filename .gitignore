@@ -1,0 +1,6 @@
+# 构建产物（源码请保留）
+bin/
+build/
+*.tmlext
+*.o
+*.obj

@@ -1,0 +1,14 @@
+{
+  "id": "com.tywstudio.example",
+  "name": "C 示例扩展",
+  "version": "1.0.0",
+  "author": "TYWStudio",
+  "description": "TML 扩展 API v1 的 C 语言示例（零依赖，编译为原生可执行）",
+  "apiVersion": 1,
+  "runtime": "c",
+  "format": "tmlext",
+  "entry": "bin/tml_ext",
+  "platforms": ["windows", "linux", "macos"],
+  "subscribe": ["launcher.started", "game.launched", "settings.changed"],
+  "permissions": ["log", "toast", "host.info", "instances.list", "events", "storage", "settings"]
+}
